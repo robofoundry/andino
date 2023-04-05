@@ -1,0 +1,275 @@
+//Motor A
+#define PWMA 10
+#define IN1 9
+#define IN2 8
+
+//Motor B
+#define IN3 7
+#define IN4 6
+#define PWMB 5
+
+
+// Encoders
+int  ENC_A = 3;
+int  ENC_B = 2;
+
+
+//Number Of tick
+int tickA = 0;
+int tickB = 0;
+
+//RPM Constants
+float velocityA = 0;
+float velocityARPM = 0;
+float vAFilt = 0;
+float vAPrev = 0;
+float velocityB = 0;
+float velocityBRPM = 0;
+float vBFilt = 0;
+float vBPrev = 0;
+
+//FIlter
+float uFilt = 0;
+float uPrev = 0;
+float wFilt = 0;
+float wPrev = 0;
+
+//Position Encoder
+int posPrevA = 0;
+int posA = 0; 
+int posPrevB = 0;
+int posB = 0; 
+
+//Control Blocks Plant
+float errorU, erroW;
+float eintegralU = 0, eintegralW = 0;
+float eprevU = 0, eprevW = 0;
+float kpU = 0.25, kiU = 3.5, kdU = 0;
+float kpW = 0.07, kiW = 1.5, kdW = 0;
+
+
+//Control Blocks Motors
+float errorA;
+float eintegralA = 0;
+float kpA = 80, kiA = 250;
+float errorB;
+float eintegralB = 0;
+float kpB = 35, kiB = 250;
+float stepReference = 2.5;
+
+
+//Tick for interruption
+volatile unsigned currentTimeTickA = 0;
+volatile unsigned previousTimeTickA = 0;
+volatile unsigned deltaTickA = 0;
+
+volatile unsigned currentTimeTickB = 0;
+volatile unsigned previousTimeTickB = 0;
+volatile unsigned deltaTickB = 0;
+
+//System stepTime
+volatile unsigned currentStepTime = 0;
+volatile unsigned previousStepTime = 0;
+volatile unsigned deltaStepTime = 0;
+
+
+int stepTime = 10;
+
+//Direction and setPoint
+int dirA = 1;
+int dirB = 1;
+float setPoint = 0;
+int pwmA_val;
+int pwmB_val;
+
+//Constants
+
+const float D = 65.5;
+const float B = 153.3;
+
+float u_output;
+float w_output;
+const float u_input = 5.0;
+const float w_input = 0;
+float velocityARPM_input = 0;
+float velocityBRPM_input = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(ENC_B, INPUT);
+  pinMode(PWMB, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(ENC_A, INPUT);
+  pinMode(PWMA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(ENC_A), encoderA, FALLING);
+  attachInterrupt(digitalPinToInterrupt(ENC_B), encoderB, FALLING);
+
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  currentStepTime = millis();
+  currentTimeTickA = currentStepTime;
+  currentTimeTickB = currentStepTime;
+  deltaStepTime = (double) currentStepTime -  previousStepTime;
+
+  if(deltaStepTime >= stepTime) {
+
+    noInterrupts();
+    posA = tickA;
+    posB = tickB;
+    interrupts();
+
+    float deltaT = ((float) deltaStepTime) / 1000; 
+    
+    //Error Proporcional
+    float errorU = u_input - uFilt;
+    float errorW = w_input - wFilt;
+
+    //Error Integral
+    eintegralU += errorU * deltaT;
+    eintegralW += errorW * deltaT;
+
+    //ErrorDerivativo
+    float edevU = (errorU - eprevU) / deltaT;
+    float edevW = (errorW - eprevW) / deltaT;
+    eprevU = errorU;
+    eprevW = errorW;
+    
+    float u_desired = errorU * kpU + eintegralU * kiU + edevU * kdU;
+    float w_desired = errorW * kpW + eintegralW * kiW + edevW * kdW; 
+
+    //Input Reference
+    velocityARPM_input = (30 * ( 2 * u_desired + w_desired * B)) / (PI*D);
+    velocityBRPM_input = (30 * ( 2 * u_desired - w_desired * B)) / (PI*D);
+    
+    controlMotors(deltaT, velocityARPM_input, velocityBRPM_input);
+
+    //Calculation of U and W 
+    u_output = (PI * D * (vAFilt + vBFilt)) / 120.0;
+    w_output = (PI * D * (vAFilt - vBFilt)) / (60.0 * B);
+    
+    uFilt = 0.854*uFilt + 0.0728*u_output + 0.0728*uPrev;
+    uPrev = u_output; 
+
+    wFilt = 0.854*wFilt + 0.0728*w_output + 0.0728*wPrev;
+    wPrev = w_output;        
+
+    Serial.print(u_input);
+    Serial.print("      ");
+    Serial.print(uFilt);
+    Serial.print("      ");
+    Serial.print(wFilt);
+    Serial.print("      ");
+    Serial.println(w_input);
+    
+    
+    
+    previousStepTime = currentStepTime;
+  }
+  
+}
+
+void setMotor(int dir, int pwm, int pwmVal, int in1, int in2) {
+   analogWrite(pwm, pwmVal);
+   deltaStepTime = (double) currentStepTime -  previousStepTime;
+  if(dir == 1) {
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+  } else if(dir == -1) {
+    digitalWrite(in1, HIGH);
+    digitalWrite(in2, LOW);
+  } else {
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, LOW);
+  }
+}
+
+
+void encoderA() {
+  deltaTickA = (double) currentTimeTickA - previousTimeTickA;
+  if(deltaTickA > 8) {
+    int increment = 0;
+    if (dirA == 1) {
+      increment = 1;  
+    } else {
+      increment = -1;
+    }
+      tickA += increment;
+      previousTimeTickA = currentTimeTickA;
+  }
+}
+
+
+void encoderB() {
+  deltaTickB = (double) currentTimeTickB - previousTimeTickB;
+  if(deltaTickB > 8) {
+    
+    int increment = 0;
+    if (dirB == 1) {
+      increment = 1;  
+    } else {
+      increment = -1;
+    }
+      tickB += increment;
+      previousTimeTickB = currentTimeTickB;
+  }
+}
+
+void controlMotors(float deltaT, float stepReferenceA, float stepReferenceB) {
+  velocityA =((float) (posA - posPrevA))/deltaT; //Count per second
+    posPrevA = tickA;
+    
+    velocityB =((float) (posB - posPrevB))/deltaT; //Count per second
+    posPrevB = tickB;
+ 
+    velocityARPM = velocityA / 40;
+    velocityBRPM = velocityB / 40; 
+
+    vAFilt = 0.854*vAFilt + 0.0728*velocityARPM + 0.0728*vAPrev;
+    vAPrev = velocityARPM;
+
+    vBFilt = 0.854*vBFilt + 0.0728*velocityBRPM + 0.0728*vBPrev;
+    vBPrev = velocityBRPM;
+
+    //Error Proportional 
+    errorA = stepReferenceA - vAFilt;
+    errorB = stepReferenceB - vBFilt;
+
+    //Integral Error 
+    eintegralA = eintegralA + errorA * deltaT;
+    eintegralB = eintegralB + errorB * deltaT;
+
+    //Step response
+    float uA = errorA * kpA + eintegralA *kiA;
+    float uB = errorB * kpB + eintegralB *kiB;
+
+    // Direction of the motors
+    dirA = 1;
+    if (uA<0) {
+      dirA = -1;
+    }
+
+    dirB = 1;
+    if (uB<0) {
+      dirB = -1;
+    }
+
+    //Speed Control
+    pwmA_val = (int) fabs(uA);
+    if (pwmA_val > 255) {
+      pwmA_val = 255;
+    }
+
+    pwmB_val = (int) fabs(uB);
+    if (pwmB_val > 255) {
+      pwmB_val = 255;
+    }
+
+    setMotor(dirA, PWMA, pwmA_val, IN2, IN1);
+    setMotor(dirB, PWMB, pwmB_val, IN3, IN4);
+}

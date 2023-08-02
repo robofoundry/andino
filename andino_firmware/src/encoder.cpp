@@ -1,5 +1,5 @@
 // Code in this file is inspired by:
-// https://github.com/hbrobotics/ros_arduino_bridge/blob/indigo-devel/ros_arduino_firmware/src/libraries/ROSArduinoBridge/encoder_driver.h
+// https://github.com/hbrobotics/ros_arduino_bridge/blob/indigo-devel/ros_arduino_firmware/src/libraries/ROSArduinoBridge/encoder_driver.ino
 //
 // ----------------------------------------------------------------------------
 // ros_arduino_bridge's license follows:
@@ -62,8 +62,57 @@
 // CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#include "encoder.h"
 
-void initEncoders();
-long readEncoder(int i);
-void resetEncoder(int i);
-void resetEncoders();
+#include <stdint.h>
+
+#include "Arduino.h"
+#include "pcint.h"
+
+namespace andino {
+
+const int8_t ENC_STATES[] = {0, 1, -1, 0,  -1, 0,  0, 1,
+                             1, 0, 0,  -1, 0,  -1, 1, 0};  // encoder lookup table
+
+Encoder* Encoder::instances[2] = {nullptr, nullptr};
+int Encoder::instance_count = 0;
+
+void Encoder::callback_0() {
+  if (Encoder::instances[0] != nullptr) {
+    Encoder::instances[0]->callback();
+  }
+}
+
+void Encoder::callback_1() {
+  if (Encoder::instances[1] != nullptr) {
+    Encoder::instances[1]->callback();
+  }
+}
+
+PCInt::InterruptCallback Encoder::callbacks[2] = {callback_0, callback_1};
+
+void Encoder::init(int a_gpio_pin, int b_gpio_pin, volatile uint8_t* pinx) {
+  pinMode(a_gpio_pin, INPUT_PULLUP);
+  pinMode(b_gpio_pin, INPUT_PULLUP);
+
+  andino::PCInt::attach_interrupt(a_gpio_pin, callbacks[instance_count]);
+  andino::PCInt::attach_interrupt(b_gpio_pin, callbacks[instance_count]);
+
+  instances[instance_count] = this;
+  instance_count++;
+
+  pinx_ = pinx;
+}
+
+void Encoder::callback() {
+  last_count_ <<= 2;                        // shift previous state two places
+  last_count_ |= (*pinx_ & (3 << 2)) >> 2;  // read the current state into lowest 2 bits
+
+  count_ += ENC_STATES[(last_count_ & 0x0f)];
+}
+
+void Encoder::reset() { count_ = 0L; }
+
+long Encoder::read() { return count_; }
+
+}  // namespace andino

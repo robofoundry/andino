@@ -1,5 +1,5 @@
 // Code in this file is inspired by:
-// https://github.com/hbrobotics/ros_arduino_bridge/blob/indigo-devel/ros_arduino_firmware/src/libraries/ROSArduinoBridge/encoder_driver.ino
+// https://github.com/hbrobotics/ros_arduino_bridge/blob/indigo-devel/ros_arduino_firmware/src/libraries/ROSArduinoBridge/encoder_driver.h
 //
 // ----------------------------------------------------------------------------
 // ros_arduino_bridge's license follows:
@@ -62,74 +62,67 @@
 // CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-#include "encoder_driver.h"
+#pragma once
 
 #include <stdint.h>
 
-#include "Arduino.h"
-#include "commands.h"
-#include "hw.h"
 #include "pcint.h"
 
-volatile long left_enc_pos = 0L;
-volatile long right_enc_pos = 0L;
-static const int8_t ENC_STATES[] = {0, 1, -1, 0,  -1, 0,  0, 1,
-                                    1, 0, 0,  -1, 0,  -1, 1, 0};  // encoder lookup table
+namespace andino {
 
-/* Interrupt routine for LEFT encoder, taking care of actual counting */
-void left_encoder_cb() {
-  static uint8_t enc_last = 0;
+/// @brief
+class Encoder {
+ public:
+  /// @brief Constructs a new Motor object.
+  ///
+  /// @param enable_gpio_pin Motor enable GPIO pin.
+  /// @param forward_gpio_pin Motor forward GPIO pin.
+  /// @param backward_gpio_pin Motor backward GPIO pin.
+  //   Motor(int enable_gpio_pin, int forward_gpio_pin, int backward_gpio_pin)
+  //       : enable_gpio_pin_(enable_gpio_pin),
+  //         forward_gpio_pin_(forward_gpio_pin),
+  //         backward_gpio_pin_(backward_gpio_pin) {}
+  Encoder() {}
 
-  enc_last <<= 2;                      // shift previous state two places
-  enc_last |= (PIND & (3 << 2)) >> 2;  // read the current state into lowest 2 bits
+  /// @brief Sets the motor state.
+  ///
+  /// @param enabled Motor state.
+  void init(int a_gpio_pin, int b_gpio_pin, volatile uint8_t* pinx);
 
-  left_enc_pos += ENC_STATES[(enc_last & 0x0f)];
-}
+  /// @brief Sets the motor speed.
+  ///
+  /// @param speed Motor speed value.
+  long read();
 
-/* Interrupt routine for RIGHT encoder, taking care of actual counting */
-void right_encoder_cb() {
-  static uint8_t enc_last = 0;
+  /// @brief
+  void reset();
 
-  enc_last <<= 2;                      // shift previous state two places
-  enc_last |= (PINC & (3 << 4)) >> 4;  // read the current state into lowest 2 bits
+  /// @brief
+  void callback();
 
-  right_enc_pos += ENC_STATES[(enc_last & 0x0f)];
-}
+  static Encoder* instances[2];
+  static int instance_count;
 
-void initEncoders() {
-  pinMode(LEFT_ENCODER_A_GPIO_PIN, INPUT_PULLUP);
-  pinMode(LEFT_ENCODER_B_GPIO_PIN, INPUT_PULLUP);
-  pinMode(RIGHT_ENCODER_A_GPIO_PIN, INPUT_PULLUP);
-  pinMode(RIGHT_ENCODER_B_GPIO_PIN, INPUT_PULLUP);
+  static PCInt::InterruptCallback callbacks[2];
 
-  andino::PCInt::attach_interrupt(LEFT_ENCODER_A_GPIO_PIN, left_encoder_cb);
-  andino::PCInt::attach_interrupt(LEFT_ENCODER_B_GPIO_PIN, left_encoder_cb);
-  andino::PCInt::attach_interrupt(RIGHT_ENCODER_A_GPIO_PIN, right_encoder_cb);
-  andino::PCInt::attach_interrupt(RIGHT_ENCODER_B_GPIO_PIN, right_encoder_cb);
-}
+  static void callback_0();
 
-/* Wrap the encoder reading function */
-long readEncoder(int i) {
-  if (i == LEFT)
-    return left_enc_pos;
-  else
-    return right_enc_pos;
-}
+  static void callback_1();
 
-/* Wrap the encoder reset function */
-void resetEncoder(int i) {
-  if (i == LEFT) {
-    left_enc_pos = 0L;
-    return;
-  } else {
-    right_enc_pos = 0L;
-    return;
-  }
-}
+ private:
+  /// Minimum speed value (negative speeds are considered as positive backward speeds).
+  static constexpr int kMinSpeed{0};
 
-/* Wrap the encoder reset function */
-void resetEncoders() {
-  resetEncoder(LEFT);
-  resetEncoder(RIGHT);
-}
+  /// Motor backward GPIO pin.
+  int backward_gpio_pin_;
+
+  ///
+  volatile long count_ = 0L;
+
+  ///
+  uint8_t last_count_ = 0;
+
+  volatile uint8_t* pinx_ = nullptr;
+};
+
+}  // namespace andino
